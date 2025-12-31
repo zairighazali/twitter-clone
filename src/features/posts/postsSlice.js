@@ -1,9 +1,8 @@
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
 import axios from "axios";
+import { collection, doc, getDocs, setDoc } from "firebase/firestore";
+import { db } from '../../firebase'
 import { jwtDecode } from "jwt-decode";
-
-const BASE_URL =
-  "https://73c8ef9d-a9be-4ce9-a268-66b95e672935-00-3q70h0gwb5ovr.pike.replit.dev";
 
 // =======================
 // FETCH POSTS BY USER
@@ -11,9 +10,18 @@ const BASE_URL =
 export const fetchPostsByUser = createAsyncThunk(
   "posts/fetchByUser",
   async (userId) => {
-    const response = await fetch(`${BASE_URL}/posts/user/${userId}`);
-    return response.json();
+  try {  
+    const postsRef = collection(db, `users/${userId}/posts`)
+    
+    const querySnapshot = await getDocs(postsRef)
+    const docs = querySnapshot.docs.map((doc) => ({id:doc.id, ...doc.data() }))
+    
+    return docs
+  } catch (error) {
+    console.error(error)
+    throw error
   }
+}  
 );
 
 // =======================
@@ -21,24 +29,28 @@ export const fetchPostsByUser = createAsyncThunk(
 // =======================
 export const savePost = createAsyncThunk(
   "posts/savePost",
-  async (postContent) => {
-    const token = localStorage.getItem("authToken");
-    const decode = jwtDecode(token);
-    const userId = decode.id;
+  async ( {userId, postContent }) => {
+     try {  
+      const postsRef = collection(db, `users/${userId}/posts`)
+      const newPostRef = doc(postsRef)
+      await setDoc(newPostRef, {content:postContent, likes:[]})
 
-    const data = {
-      title: "Post Title",
-      content: postContent,
-      user_id: userId,
-    };
-
-    const response = await axios.post(`${BASE_URL}/posts`, data);
-    return response.data;
+      const newPost = await getDocs(newPostRef)
+      const post = {
+        id: newPost.id,
+        ...newPost.data()
+      }
+    return post
+    } catch (error) {
+      console.error(error)
+      throw error
+    }
   }
+  
 );
 
 // =======================
-// 🔍 SEARCH POSTS
+// SEARCH POSTS
 // =======================
 export const searchPosts = createAsyncThunk(
   "posts/searchPosts",
@@ -58,7 +70,7 @@ const postsSlice = createSlice({
   name: "posts",
   initialState: {
     posts: [],
-    searchResults: [], // 👈 TAMBAH
+    searchResults: [], 
     loading: true,
     error: null,
   },
@@ -82,7 +94,27 @@ const postsSlice = createSlice({
         state.posts = [action.payload, ...state.posts];
       })
 
-      // 🔍 SEARCH POSTS
+      // LIKE POST
+      .addCase(likePost.fulfilled, (state, action) => {
+        const { userId, postId } = action.payload
+
+        const postIndex = state.posts.findIndex((post) => post.id === postId)
+        if (postIndex !== -1) {
+          state.posts[postIndex].likes.push(userId)
+        }
+      })
+
+      // REMOVE LIKE
+      .addCase(removeLikeFromPost.fulfilled, (state, action) => {
+        const { userId, postId } = action.payload
+
+        const postIndex = state.posts.findIndex((post) => post.id === postId)
+        if (postIndex !== -1) {
+          state.posts[postIndex].likes = state.posts[postIndex].likes.filter((id) => id !== userId)
+        }
+      })
+
+      // SEARCH POSTS
       .addCase(searchPosts.pending, (state) => {
         state.loading = true;
         state.error = null;
@@ -97,5 +129,47 @@ const postsSlice = createSlice({
       });
   },
 });
+
+export const likePost = createAsyncThunk(
+  'posts/likePost',
+  async ({ userId, postId }) => {
+    try {
+      const postRef = doc (db, `users/${userId}/posts/${postId}`)
+      const docSnap = await getDocs(postRef)
+
+      if (docSnap.exists()) {
+        const postData = docSnap.data()
+        const likes = [...postData.likes, userId]
+
+        await setDoc(postRef, {...postData, likes })
+      }
+      return { userId, postId }
+    } catch (error) {
+      console.error(error)
+      throw error
+    }
+  }
+)
+
+export const removeLikeFromPost = createAsyncThunk(
+  'posts/removeLikeFromPost',
+  async ({ userId, postId }) => {
+    try {
+      const postRef = doc (db, `users/${userId}/posts/${postId}`)
+      const docSnap = await getDocs(postRef)
+
+      if (docSnap.exists()) {
+        const postData = docSnap.data()
+        const likes = postData.likes.filter((id) => id !== userId)
+
+        await setDoc(postRef, {...postData, likes })
+      }
+      return { userId, postId }
+    } catch (error) {
+      console.error(error)
+      throw error
+    }
+  }
+)
 
 export default postsSlice.reducer;
