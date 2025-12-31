@@ -1,8 +1,10 @@
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
 import axios from "axios";
-import { collection, doc, getDocs, setDoc } from "firebase/firestore";
-import { db } from '../../firebase'
+import { collection, doc, getDocs, setDoc, updateDoc, deleteDoc } from "firebase/firestore";
+import { db, storage } from "../../firebase";
 import { jwtDecode } from "jwt-decode";
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import context from "react-bootstrap/esm/AccordionContext";
 
 // =======================
 // FETCH POSTS BY USER
@@ -10,18 +12,21 @@ import { jwtDecode } from "jwt-decode";
 export const fetchPostsByUser = createAsyncThunk(
   "posts/fetchByUser",
   async (userId) => {
-  try {  
-    const postsRef = collection(db, `users/${userId}/posts`)
-    
-    const querySnapshot = await getDocs(postsRef)
-    const docs = querySnapshot.docs.map((doc) => ({id:doc.id, ...doc.data() }))
-    
-    return docs
-  } catch (error) {
-    console.error(error)
-    throw error
+    try {
+      const postsRef = collection(db, `users/${userId}/posts`);
+
+      const querySnapshot = await getDocs(postsRef);
+      const docs = querySnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+
+      return docs;
+    } catch (error) {
+      console.error(error);
+      throw error;
+    }
   }
-}  
 );
 
 // =======================
@@ -29,25 +34,80 @@ export const fetchPostsByUser = createAsyncThunk(
 // =======================
 export const savePost = createAsyncThunk(
   "posts/savePost",
-  async ( {userId, postContent }) => {
-     try {  
-      const postsRef = collection(db, `users/${userId}/posts`)
-      const newPostRef = doc(postsRef)
-      await setDoc(newPostRef, {content:postContent, likes:[]})
+  async ({ userId, postContent, file }) => {
+    try {
+      let imageUrl = "";
+      console.log(file);
+      if (file !== null) {
+        const imageRef = ref(storage, `posts/${file.name}`);
+        const response = await uploadBytes(imageRef, file);
+        imageUrl = await getDownloadURL(response.ref);
+      }
+      const postsRef = collection(db, `users/${userId}/posts`);
+      const newPostRef = doc(postsRef);
+      await setDoc(newPostRef, { content: postContent, likes: [], imageUrl });
 
-      const newPost = await getDocs(newPostRef)
+      const newPost = await getDocs(newPostRef);
       const post = {
         id: newPost.id,
-        ...newPost.data()
+        ...newPost.data(),
+      };
+      return post;
+    } catch (error) {
+      console.error(error);
+      throw error;
+    }
+  }
+);
+
+// Update POSTS
+export const updatePost = createAsyncThunk(
+  'posts/updatePost',
+  async ({ userId, postId, newPostContent, newFile}) => { 
+  try {
+    let newImageURL
+    if (newFile) {
+      const imageRef = ref(storage, `posts/${newFile.name}`)
+      const response = await uploadBytes(imageRef, newFile)
+      newImageURL = await getDownloadURL(response.ref)
+    }
+    const postRef = doc(db, `users/${userId}/posts/${postId}`)
+    const postSnap = await getDoc(postRef)
+    if (postSnap.exists()){
+      const postData = postSnap.data()
+
+      const updatedData = {
+        ...postData,
+        content: newPostContent || postData.content,
+        imageUrl: newImageURL || postData.imageUrl
       }
-    return post
+      await updateDoc(postRef, updatedData)
+      const updatePost = { id: postId, ...updatedData}
+      return updatedPost
+    } else {
+      throw new error('Post does not exist')
+    }
+  } catch (error){
+    console.error(error)
+    throw error
+  }
+}
+)
+
+// Delete Post
+export const deletePost = createAsyncThunk(
+  'posts/deletePost',
+  async ({ userId, postId }) => {
+    try {
+      const postRef = doc(db, `users/${userId}/posts/${postId}`)
+      await deleteDoc(postRef)
+      return postId
     } catch (error) {
       console.error(error)
       throw error
     }
   }
-  
-);
+)
 
 // =======================
 // SEARCH POSTS
@@ -70,7 +130,7 @@ const postsSlice = createSlice({
   name: "posts",
   initialState: {
     posts: [],
-    searchResults: [], 
+    searchResults: [],
     loading: true,
     error: null,
   },
@@ -94,24 +154,44 @@ const postsSlice = createSlice({
         state.posts = [action.payload, ...state.posts];
       })
 
+      // Update Post
+      .addCase(updatePost.fulfilled, (state, action) => {
+        const updatedPost = action.payload
+        const postIndex = state.posts.findIndex(
+          (post) => post.id === updatedPost.id
+        )
+        if (postIndex !== -1) {
+          state.posts[postIndex] = updatedPost
+        }
+      })
+
       // LIKE POST
       .addCase(likePost.fulfilled, (state, action) => {
-        const { userId, postId } = action.payload
+        const { userId, postId } = action.payload;
 
-        const postIndex = state.posts.findIndex((post) => post.id === postId)
+        const postIndex = state.posts.findIndex((post) => post.id === postId);
         if (postIndex !== -1) {
-          state.posts[postIndex].likes.push(userId)
+          state.posts[postIndex].likes.push(userId);
         }
       })
 
       // REMOVE LIKE
       .addCase(removeLikeFromPost.fulfilled, (state, action) => {
-        const { userId, postId } = action.payload
+        const { userId, postId } = action.payload;
 
-        const postIndex = state.posts.findIndex((post) => post.id === postId)
+        const postIndex = state.posts.findIndex((post) => post.id === postId);
         if (postIndex !== -1) {
-          state.posts[postIndex].likes = state.posts[postIndex].likes.filter((id) => id !== userId)
+          state.posts[postIndex].likes = state.posts[postIndex].likes.filter(
+            (id) => id !== userId
+          );
         }
+      })
+
+      // Delete Post
+      .addCase(deletePost.fulfilled, (state, action) => {
+        const deletedPostId = action.payload
+
+        state.posts = state.posts.filter((post) => post.id !== deletedPostId)
       })
 
       // SEARCH POSTS
@@ -131,45 +211,45 @@ const postsSlice = createSlice({
 });
 
 export const likePost = createAsyncThunk(
-  'posts/likePost',
+  "posts/likePost",
   async ({ userId, postId }) => {
     try {
-      const postRef = doc (db, `users/${userId}/posts/${postId}`)
-      const docSnap = await getDocs(postRef)
+      const postRef = doc(db, `users/${userId}/posts/${postId}`);
+      const docSnap = await getDocs(postRef);
 
       if (docSnap.exists()) {
-        const postData = docSnap.data()
-        const likes = [...postData.likes, userId]
+        const postData = docSnap.data();
+        const likes = [...postData.likes, userId];
 
-        await setDoc(postRef, {...postData, likes })
+        await setDoc(postRef, { ...postData, likes });
       }
-      return { userId, postId }
+      return { userId, postId };
     } catch (error) {
-      console.error(error)
-      throw error
+      console.error(error);
+      throw error;
     }
   }
-)
+);
 
 export const removeLikeFromPost = createAsyncThunk(
-  'posts/removeLikeFromPost',
+  "posts/removeLikeFromPost",
   async ({ userId, postId }) => {
     try {
-      const postRef = doc (db, `users/${userId}/posts/${postId}`)
-      const docSnap = await getDocs(postRef)
+      const postRef = doc(db, `users/${userId}/posts/${postId}`);
+      const docSnap = await getDocs(postRef);
 
       if (docSnap.exists()) {
-        const postData = docSnap.data()
-        const likes = postData.likes.filter((id) => id !== userId)
+        const postData = docSnap.data();
+        const likes = postData.likes.filter((id) => id !== userId);
 
-        await setDoc(postRef, {...postData, likes })
+        await setDoc(postRef, { ...postData, likes });
       }
-      return { userId, postId }
+      return { userId, postId };
     } catch (error) {
-      console.error(error)
-      throw error
+      console.error(error);
+      throw error;
     }
   }
-)
+);
 
 export default postsSlice.reducer;
