@@ -6,9 +6,8 @@ import { jwtDecode } from "jwt-decode";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import context from "react-bootstrap/esm/AccordionContext";
 
-// =======================
+
 // FETCH POSTS BY USER
-// =======================
 export const fetchPostsByUser = createAsyncThunk(
   "posts/fetchByUser",
   async (userId) => {
@@ -29,9 +28,7 @@ export const fetchPostsByUser = createAsyncThunk(
   }
 );
 
-// =======================
 // SAVE POST
-// =======================
 export const savePost = createAsyncThunk(
   "posts/savePost",
   async ({ userId, postContent, file }) => {
@@ -39,9 +36,9 @@ export const savePost = createAsyncThunk(
       let imageUrl = "";
       console.log(file);
       if (file !== null) {
-        const imageRef = ref(storage, `posts/${file.name}`);
-        const response = await uploadBytes(imageRef, file);
-        imageUrl = await getDownloadURL(response.ref);
+        const imageRef = ref(storage, `posts/${file.name}`); //sama macam posts/file name dalam folder.
+        const response = await uploadBytes(imageRef, file); //uploadbytes tu upload file pcs by pcs
+        imageUrl = await getDownloadURL(response.ref); // buat image tu proper url link
       }
       const postsRef = collection(db, `users/${userId}/posts`);
       const newPostRef = doc(postsRef);
@@ -60,7 +57,7 @@ export const savePost = createAsyncThunk(
   }
 );
 
-// Update POSTS
+// UPDATE POSTS
 export const updatePost = createAsyncThunk(
   'posts/updatePost',
   async ({ userId, postId, newPostContent, newFile}) => { 
@@ -82,10 +79,10 @@ export const updatePost = createAsyncThunk(
         imageUrl: newImageURL || postData.imageUrl
       }
       await updateDoc(postRef, updatedData)
-      const updatePost = { id: postId, ...updatedData}
+      const updatedPost = { id: postId, ...updatedData}
       return updatedPost
     } else {
-      throw new error('Post does not exist')
+      throw new Error('Post does not exist')
     }
   } catch (error){
     console.error(error)
@@ -109,9 +106,7 @@ export const deletePost = createAsyncThunk(
   }
 )
 
-// =======================
 // SEARCH POSTS
-// =======================
 export const searchPosts = createAsyncThunk(
   "posts/searchPosts",
   async (searchTerm, thunkAPI) => {
@@ -154,7 +149,7 @@ const postsSlice = createSlice({
         state.posts = [action.payload, ...state.posts];
       })
 
-      // Update Post
+      // UPDATE POST
       .addCase(updatePost.fulfilled, (state, action) => {
         const updatedPost = action.payload
         const postIndex = state.posts.findIndex(
@@ -187,7 +182,7 @@ const postsSlice = createSlice({
         }
       })
 
-      // Delete Post
+      // DELETE POST
       .addCase(deletePost.fulfilled, (state, action) => {
         const deletedPostId = action.payload
 
